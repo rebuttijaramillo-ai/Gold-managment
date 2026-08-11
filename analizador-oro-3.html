@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#14161c">
+<title>Analizador de Oro · precio real vs. distorsión</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#ffffff; --line:#e5e8ef; --line2:#eef0f5;
+    --ink:#161922; --muted:#697086; --faint:#98a0b3;
+    --gold:#bf9b30;        /* nominal */
+    --real:#2f6f8f;        /* ajustado por inflación */
+    --trend:#a9b0be;       /* tendencia */
+    --distort:rgba(191,155,48,.14);
+    --mine:#7a4fb0;
+    --warn:#b45309; --warnbg:#fbf3e7;
+    --good:#2f7d57; --bad:#b04242;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Roboto Mono",monospace;
+    --sans:-apple-system,"Segoe UI",system-ui,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);
+    line-height:1.5;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+  .wrap{max-width:860px;margin:0 auto;padding:20px 16px 64px}
+
+  header{margin:8px 0 22px}
+  .eyebrow{font-size:11px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--gold);font-weight:700}
+  h1{font-size:26px;line-height:1.15;margin:6px 0 6px;letter-spacing:-.02em;font-weight:800}
+  .sub{color:var(--muted);font-size:14px;max-width:60ch}
+
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:16px;margin:14px 0}
+  .panel h2{font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--muted);margin:0 0 12px;font-weight:700}
+
+  /* input row */
+  .price-row{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+  .field{flex:1;min-width:150px}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px;font-weight:600}
+  input,select{width:100%;font-family:var(--mono);font-size:17px;color:var(--ink);
+    background:#fff;border:1px solid var(--line);border-radius:9px;padding:11px 12px;
+    -webkit-appearance:none;appearance:none}
+  input:focus,select:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
+  .gbtn{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;
+    color:var(--real);text-decoration:none;border:1px solid var(--line);border-radius:9px;
+    padding:11px 13px;background:#fff;white-space:nowrap}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .seg button{font-family:var(--sans);font-size:13px;font-weight:600;border:0;background:#fff;
+    color:var(--muted);padding:11px 14px;cursor:pointer}
+  .seg button.on{background:var(--ink);color:#fff}
+
+  /* chart */
+  .chart-head{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px}
+  canvas{width:100%;height:300px;display:block;touch-action:pan-y}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:12.5px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .swatch{width:14px;height:3px;border-radius:2px;display:inline-block}
+  .swatch.dash{background:repeating-linear-gradient(90deg,var(--trend) 0 4px,transparent 4px 7px);height:2px}
+  .swatch.fill{height:11px;width:14px;border-radius:3px;background:var(--distort)}
+  .toggle{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;user-select:none}
+  .toggle input{width:auto}
+
+  /* readouts */
+  .reads{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:520px){.reads{grid-template-columns:1fr}}
+  .read{border:1px solid var(--line);border-radius:11px;padding:14px}
+  .read .k{font-size:12px;color:var(--muted);font-weight:600;margin-bottom:6px}
+  .read .v{font-family:var(--mono);font-size:22px;font-weight:600;letter-spacing:-.01em}
+  .read .n{font-size:12.5px;color:var(--muted);margin-top:6px}
+  .tag{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;margin-left:6px;vertical-align:middle}
+  .tag.hi{background:#fbeaea;color:var(--bad)} .tag.lo{background:#e9f4ee;color:var(--good)}
+  .tag.mid{background:#f0f1f5;color:var(--muted)}
+
+  .note{font-size:13px;color:var(--muted);margin-top:12px}
+  .callout{background:var(--warnbg);border:1px solid #f0dcc0;border-left:3px solid var(--warn);
+    border-radius:10px;padding:12px 14px;font-size:13px;color:#7a4d12;margin-top:14px}
+  .callout b{color:var(--warn)}
+
+  ul.drivers{list-style:none;padding:0;margin:0;display:grid;gap:10px}
+  ul.drivers li{font-size:13.5px;color:var(--ink)}
+  ul.drivers b{display:block;font-size:12px;letter-spacing:.02em;color:var(--gold);text-transform:uppercase;margin-bottom:1px}
+
+  .dca-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .dca-out{grid-column:1/-1;border-top:1px dashed var(--line);padding-top:14px;margin-top:2px}
+  .dca-line{display:flex;justify-content:space-between;font-size:14px;padding:5px 0}
+  .dca-line span:last-child{font-family:var(--mono);font-weight:600}
+
+  /* registro / portafolio */
+  .lot-form{display:grid;grid-template-columns:1.1fr 1fr 1fr auto;gap:10px;align-items:end}
+  @media(max-width:600px){.lot-form{grid-template-columns:1fr 1fr}}
+  .addbtn{font-family:var(--sans);font-size:14px;font-weight:700;color:#fff;background:var(--ink);
+    border:0;border-radius:9px;padding:12px 16px;cursor:pointer;height:44px}
+  @media(max-width:600px){.addbtn{grid-column:1/-1}}
+  .lot-hint{font-size:12px;color:var(--faint);margin:8px 0 0}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:14px;min-width:520px}
+  th{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);text-align:right;
+    font-weight:700;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th:first-child{text-align:left}
+  td{padding:9px 10px;border-bottom:1px solid var(--line2);text-align:right;font-family:var(--mono)}
+  td:first-child{text-align:left;font-family:var(--sans);color:var(--muted)}
+  tr.gain td.g{color:var(--good)} tr.loss td.g{color:var(--bad)}
+  .del{border:0;background:none;color:var(--faint);font-size:16px;cursor:pointer;padding:0 4px;line-height:1}
+  .del:hover{color:var(--bad)}
+  tfoot td{font-family:var(--mono);font-weight:700;border-top:2px solid var(--line);border-bottom:0;color:var(--ink)}
+  tfoot td:first-child{font-family:var(--sans)}
+  #portChart{height:160px;margin-top:8px}
+  footer{margin-top:26px;font-size:12px;color:var(--faint);line-height:1.6}
+  .disc{border:1px dashed var(--line);border-radius:12px;padding:14px;font-size:12.5px;color:var(--muted)}
+  .disc b{color:var(--ink)}
+  /* auto-actualizar precio */
+  .auto-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px}
+  .autobtn{font-family:var(--sans);font-size:13px;font-weight:700;color:var(--real);
+    background:#fff;border:1px solid var(--real);border-radius:9px;padding:10px 14px;cursor:pointer}
+  .autobtn:disabled{opacity:.55;cursor:default}
+  .fetch-status{font-size:12.5px;color:var(--muted)}
+  .fetch-status.ok{color:var(--good)} .fetch-status.err{color:var(--bad)}
+  details.apikey{margin-top:10px;font-size:12.5px}
+  details.apikey summary{color:var(--real);cursor:pointer;font-weight:600}
+  details.apikey .kbox{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+  details.apikey input{flex:1;min-width:180px;font-size:13px;padding:9px 10px}
+  details.apikey p{color:var(--muted);margin:8px 0 0}
+  details.apikey a{color:var(--real)}
+  /* autenticación */
+  .userbar{display:flex;justify-content:space-between;align-items:center;
+    background:var(--panel);border:1px solid var(--line);border-radius:11px;
+    padding:9px 14px;margin-bottom:14px;font-size:13px}
+  .userbar b{color:var(--ink)}
+  .linkbtn{border:0;background:none;color:var(--real);font-weight:700;font-size:13px;cursor:pointer;font-family:var(--sans)}
+  .auth-overlay{position:fixed;inset:0;background:rgba(20,22,28,.55);backdrop-filter:blur(4px);
+    display:flex;align-items:center;justify-content:center;padding:20px;z-index:100}
+  .auth-card{background:var(--panel);border:1px solid var(--line);border-radius:16px;
+    padding:24px;width:100%;max-width:360px;box-shadow:0 20px 50px rgba(20,22,28,.25)}
+  .auth-card .eyebrow{font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--gold);font-weight:700}
+  .auth-card h2{font-size:21px;margin:6px 0 16px;letter-spacing:-.01em;font-weight:800;color:var(--ink)}
+  .auth-field{margin-bottom:12px}
+  .auth-field label{font-size:12px;color:var(--muted);font-weight:600;margin-bottom:5px;display:block}
+  .auth-field input{width:100%;font-size:16px;padding:11px 12px;border:1px solid var(--line);border-radius:9px}
+  .auth-field input:focus{outline:2px solid var(--gold);outline-offset:1px;border-color:var(--gold)}
+  .auth-msg{font-size:13px;color:var(--bad);min-height:18px;margin:2px 0 8px}
+  .authbtn{width:100%;font-family:var(--sans);font-size:15px;font-weight:700;color:#fff;
+    background:var(--ink);border:0;border-radius:10px;padding:13px;cursor:pointer}
+  .auth-switch{font-size:13px;color:var(--muted);text-align:center;margin:14px 0 0}
+  .auth-switch a{color:var(--real);font-weight:700;cursor:pointer}
+  .auth-note{font-size:11.5px;color:var(--faint);line-height:1.5;margin:16px 0 0;
+    border-top:1px solid var(--line2);padding-top:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="userbar" id="userbar" style="display:none">
+    <span>👤 <b id="userName"></b></span>
+    <button id="logoutBtn" class="linkbtn" type="button">Cerrar sesión</button>
+  </div>
+
+  <header>
+    <div class="eyebrow">Precio real vs. distorsión</div>
+    <h1>Analizador de Oro</h1>
+    <p class="sub">Separa lo que subió el oro de lo que solo subió porque el dinero perdió valor. Te dice si el precio de hoy está caro o barato frente a su propia historia — como contexto, nunca como señal de compra.</p>
+  </header>
+
+  <!-- ENTRADA DE PRECIO -->
+  <section class="panel">
+    <h2>Precio de hoy</h2>
+    <div class="price-row">
+      <div class="field">
+        <label for="price">Precio actual del oro</label>
+        <input id="price" type="number" inputmode="decimal" value="141" min="0" step="0.5">
+      </div>
+      <div class="seg" id="unitSeg" role="group" aria-label="Unidad del precio">
+        <button type="button" data-u="oz">USD/oz</button>
+        <button type="button" data-u="g" class="on">USD/g</button>
+      </div>
+      <a class="gbtn" href="https://www.google.com/search?q=precio+del+oro+gramo+usd+hoy" target="_blank" rel="noopener">🔎 Buscar en Google</a>
+    </div>
+    <p class="note">Búscalo en Google (o en tu app de precios), elige la unidad, escríbelo aquí y todo se recalcula. <b><span id="pergram">—</span></b></p>
+
+    <div class="auto-row">
+      <button id="fetchBtn" class="autobtn" type="button">⟳ Actualizar precio ahora</button>
+      <span id="fetchStatus" class="fetch-status">Se actualiza sola al abrir la app.</span>
+    </div>
+    <details class="apikey">
+      <summary>Para actualización diaria confiable: pega tu API key gratuita (recomendado)</summary>
+      <div class="kbox">
+        <input id="apiKey" type="text" placeholder="Pega aquí tu key de metals.dev" autocomplete="off">
+        <button id="fetchKeyBtn" class="autobtn" type="button">Guardar y probar</button>
+      </div>
+      <p>1) Entra a <a href="https://metals.dev" target="_blank" rel="noopener">metals.dev</a> y regístrate gratis. 2) Copia tu <i>API key</i>. 3) Pégala aquí y toca "Guardar y probar". Queda guardada en tu tablet y, con ella, cada vez que abras la app trae el precio del día solo (una consulta diaria cabe de sobra en el plan gratuito). Si algún día no hay señal, muestra el último precio guardado. El precio manual siempre está disponible como respaldo.</p>
+    </details>
+  </section>
+
+  <!-- GRAFICO -->
+  <section class="panel">
+    <div class="chart-head">
+      <h2 style="margin:0">Histórico: nominal vs. real</h2>
+      <label class="toggle"><input type="checkbox" id="showDistort" checked> Mostrar distorsión por inflación</label>
+    </div>
+    <canvas id="chart" aria-label="Gráfico del precio del oro nominal y ajustado por inflación"></canvas>
+    <div class="legend">
+      <span><i class="swatch" style="background:var(--gold)"></i> Nominal (lo que costó)</span>
+      <span><i class="swatch" style="background:var(--real)"></i> Real, en dólares de hoy</span>
+      <span><i class="swatch dash"></i> Tendencia de largo plazo</span>
+      <span id="distLeg"><i class="swatch fill"></i> Distorsión por inflación</span>
+      <span id="mineLeg" style="display:none"><i class="swatch" style="width:10px;height:10px;border-radius:50%;background:var(--mine)"></i> Tus registros (mercado)</span>
+    </div>
+    <p class="note">La franja sombreada es lo que el precio subió <i>solo</i> porque el dólar valía más antes: no es riqueza real del oro, es inflación. La línea azul es el precio "limpio" de esa distorsión.</p>
+  </section>
+
+  <!-- VALUACION -->
+  <section class="panel">
+    <h2>¿Caro o barato hoy?</h2>
+    <div class="reads">
+      <div class="read">
+        <div class="k">Frente a su tendencia de largo plazo</div>
+        <div class="v" id="devVal">—</div>
+        <div class="n" id="devNote"></div>
+      </div>
+      <div class="read">
+        <div class="k">Frente a su máximo real (desde 1999)</div>
+        <div class="v" id="peakVal">—</div>
+        <div class="n" id="peakNote"></div>
+      </div>
+    </div>
+    <div class="callout">
+      <b>Esto es contexto, no una señal de compra.</b> Que el oro esté "caro" frente a su tendencia no significa que vaya a bajar, ni "barato" que vaya a subir. Nadie puede cronometrar el mercado. Como referencia: en su pico de 1980, el oro en dólares de hoy rondaba los ~$3.000/oz y luego tardó <b>casi 30 años</b> en recuperar ese nivel real.
+    </div>
+  </section>
+
+  <!-- QUE MUEVE EL PRECIO -->
+  <section class="panel">
+    <h2>Qué mueve el precio (y por qué no se puede modelar con certeza)</h2>
+    <ul class="drivers">
+      <li><b>Tasas de interés reales</b>Cuando suben, el oro suele bajar (rinde 0%, así que compite mal con bonos que pagan). Cuando bajan o son negativas, el oro brilla.</li>
+      <li><b>Fuerza del dólar</b>Dólar fuerte tiende a empujar el oro hacia abajo, y viceversa.</li>
+      <li><b>Inflación y miedo</b>Se dispara en crisis de confianza en el dinero, no siempre cuando "debería".</li>
+      <li><b>Compras de bancos centrales</b>El motor más concreto del rally reciente: diversificación fuera del dólar.</li>
+      <li><b>Geopolítica</b>Guerras y sanciones lo impulsan, pero de forma impredecible y a veces pasajera.</li>
+    </ul>
+    <p class="note">Estas variables se contradicen entre sí y cambian de peso con el tiempo. Por eso ninguna herramienta —ni esta— puede decirte de forma fiable <i>cuándo</i> comprar. Solo puede ubicarte en el mapa histórico.</p>
+  </section>
+
+  <!-- CALCULADORA DCA -->
+  <section class="panel">
+    <h2>Simulador de ahorro en oro</h2>
+    <div class="dca-grid">
+      <div class="field">
+        <label for="dcaAmt">Ahorro mensual (USD)</label>
+        <input id="dcaAmt" type="number" inputmode="decimal" value="100" min="0" step="10">
+      </div>
+      <div class="field">
+        <label for="dcaYear">Desde el año</label>
+        <select id="dcaYear"></select>
+      </div>
+      <div class="field">
+        <label for="dcaRate">Alternativa segura (% anual)</label>
+        <input id="dcaRate" type="number" inputmode="decimal" value="6" min="0" step="0.5">
+      </div>
+      <div class="field" style="display:flex;align-items:flex-end">
+        <div class="note" style="margin:0">Compra oro cada mes al precio de ese año (aprox.) y lo compara con poner el mismo dinero a interés compuesto.</div>
+      </div>
+      <div class="dca-out">
+        <div class="dca-line"><span>Total aportado</span><span id="oInv">—</span></div>
+        <div class="dca-line"><span>Gramos acumulados</span><span id="oGr">—</span></div>
+        <div class="dca-line"><span>Valor hoy en oro</span><span id="oVal">—</span></div>
+        <div class="dca-line"><span>Ese mismo dinero al <span id="rShow">6</span>%</span><span id="oAlt">—</span></div>
+      </div>
+    </div>
+    <p class="note" id="dcaVerdict"></p>
+  </section>
+
+  <!-- REGISTRO DE COMPRAS -->
+  <section class="panel">
+    <h2>Mi registro de compras</h2>
+    <div class="lot-form">
+      <div class="field">
+        <label for="lotDate">Fecha (mes)</label>
+        <input id="lotDate" type="month">
+      </div>
+      <div class="field">
+        <label for="lotGr">Gramos comprados</label>
+        <input id="lotGr" type="number" inputmode="decimal" min="0" step="0.1" placeholder="ej. 4">
+      </div>
+      <div class="field">
+        <label for="lotPr">Precio pagado (USD/gramo)</label>
+        <input id="lotPr" type="number" inputmode="decimal" min="0" step="0.01" placeholder="lo que pagaste">
+      </div>
+      <div class="field">
+        <label for="lotMk">Valor de mercado ese día (USD/g)</label>
+        <input id="lotMk" type="number" inputmode="decimal" min="0" step="0.01" placeholder="spot del día">
+      </div>
+      <button id="lotAdd" class="addbtn">Agregar lote</button>
+    </div>
+    <p class="lot-hint">Precio de hoy para referencia: <b id="lotHint">—</b> por gramo. El "valor de mercado" que registres alimenta la gráfica de referencia con datos reales. Cada lote se guarda en tu tablet.</p>
+
+    <p class="note" id="lotEmpty">Aún no registras compras. Agrega tu primer lote arriba para ver cuánto vas ganando lote a lote.</p>
+    <div id="lotWrap" style="overflow-x:auto;display:none">
+      <table id="lotTable">
+        <thead>
+          <tr><th>Fecha</th><th>Gramos</th><th>Compra/g</th><th>Mercado/g</th><th>Costo</th><th>Valor hoy</th><th>Ganancia</th><th>%</th><th></th></tr>
+        </thead>
+        <tbody id="lotBody"></tbody>
+        <tfoot>
+          <tr>
+            <td>Total</td><td id="tGr">—</td><td></td><td></td><td id="tCost">—</td>
+            <td id="tVal">—</td><td id="tGain" class="g">—</td><td id="tPct">—</td><td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    <canvas id="portChart" aria-label="Costo acumulado vs. valor actual por lote"></canvas>
+    <p class="note" id="portNote" style="display:none">La línea dorada es lo que has aportado; la azul, lo que vale hoy. La distancia entre ambas es tu ganancia (o pérdida) acumulada.</p>
+  </section>
+
+  <div class="disc">
+    <b>Léelo antes de decidir.</b> Los precios históricos son <b>promedios anuales aproximados</b> y la inflación es del IPC de EE. UU. (referencia), no cifras oficiales; el resultado puede variar fácilmente ±10–15%. Esta herramienta es <b>educativa</b>, no asesoría financiera. El pasado del oro (que parte de su mínimo histórico) no predice su futuro. Para decisiones sobre tu dinero, consulta a un asesor certificado e independiente.
+  </div>
+
+  <footer>
+    <p><b>Para instalarla en tu tablet:</b> ábrela en Chrome → menú (⋮) → "Agregar a la pantalla de inicio". Quedará como un ícono y funciona sin internet.</p>
+    <p>Datos aproximados 1999–2025. Cálculos hechos en tu dispositivo; nada se envía a ningún servidor.</p>
+  </footer>
+
+</div>
+
+<div id="authModal" class="auth-overlay">
+  <div class="auth-card">
+    <div class="eyebrow">Analizador de Oro</div>
+    <h2 id="authTitle">Iniciar sesión</h2>
+    <div class="auth-field">
+      <label for="auName">Usuario</label>
+      <input id="auName" type="text" autocomplete="username" autocapitalize="none">
+    </div>
+    <div class="auth-field">
+      <label for="auPass">Contraseña</label>
+      <input id="auPass" type="password" autocomplete="current-password">
+    </div>
+    <div class="auth-field" id="auConfirmWrap" style="display:none">
+      <label for="auPass2">Repite la contraseña</label>
+      <input id="auPass2" type="password" autocomplete="new-password">
+    </div>
+    <p id="authMsg" class="auth-msg"></p>
+    <button id="authBtn" class="authbtn" type="button">Entrar</button>
+    <p class="auth-switch"><span id="authSwitchTxt">¿Nuevo aquí?</span> <a id="authSwitch">Crear usuario</a></p>
+    <p class="auth-note"><b>Candado de conveniencia</b> para separar los datos de cada persona en esta tablet — no es seguridad de nivel bancario. Las contraseñas se guardan solo en este dispositivo. No uses una contraseña que uses en tu banco o correo.</p>
+  </div>
+</div>
+
+<script>
+// ---- Datos aproximados: precio promedio anual del oro (USD/oz) ----
+const GOLD = {1999:279,2000:279,2001:271,2002:310,2003:363,2004:410,2005:445,
+2006:603,2007:695,2008:872,2009:972,2010:1225,2011:1572,2012:1669,2013:1411,
+2014:1266,2015:1160,2016:1251,2017:1257,2018:1269,2019:1393,2020:1770,2021:1799,
+2022:1801,2023:1943,2024:2390,2025:3200};
+// Inflación IPC EE.UU. durante cada año (%)
+const INFL = {2000:3.4,2001:2.8,2002:1.6,2003:2.3,2004:2.7,2005:3.4,2006:3.2,
+2007:2.8,2008:3.8,2009:-0.4,2010:1.6,2011:3.2,2012:2.1,2013:1.5,2014:1.6,
+2015:0.1,2016:1.3,2017:2.1,2018:2.4,2019:1.8,2020:1.2,2021:4.7,2022:8.0,
+2023:4.1,2024:2.9,2025:2.9};
+const G_PER_OZ = 31.1035;
+const YEARS = Object.keys(GOLD).map(Number).sort((a,b)=>a-b);
+
+// Nivel de precios (1999 = 1) y factor a "hoy" (~ene 2026)
+const PL = {1999:1};
+for(let y=2000;y<=2025;y++) PL[y]=PL[y-1]*(1+INFL[y]/100);
+const PL_TODAY = PL[2025]*1.003;
+const realFactor = y => PL_TODAY/PL[y];         // nominal(y) -> USD de hoy
+
+const $ = id => document.getElementById(id);
+const fmt = (n,d=0) => n.toLocaleString('en-US',{maximumFractionDigits:d,minimumFractionDigits:d});
+const usd = (n,d=0) => '$'+fmt(n,d);
+
+// Regresión log-lineal sobre el precio REAL para la tendencia
+function trendFn(){
+  const xs=YEARS, ys=YEARS.map(y=>Math.log(GOLD[y]*realFactor(y)));
+  const n=xs.length, mx=xs.reduce((a,b)=>a+b,0)/n, my=ys.reduce((a,b)=>a+b,0)/n;
+  let num=0,den=0;
+  xs.forEach((x,i)=>{num+=(x-mx)*(ys[i]-my);den+=(x-mx)**2;});
+  const slope=num/den, icept=my-slope*mx;
+  return year=>Math.exp(icept+slope*year);
+}
+const trend = trendFn();
+
+let unitPerGram = false; // el gráfico se mantiene en /oz para la escala; lecturas usan input
+
+let priceUnit='g'; // 'oz' o 'g' — unidad en que el usuario escribe el precio
+
+function currentOz(){
+  const v=Math.max(0, parseFloat($('price').value)||0);
+  return priceUnit==='g' ? v*G_PER_OZ : v;
+}
+
+// ---------- Gráfico (canvas puro, sin librerías) ----------
+const cv=$('chart'), ctx=cv.getContext('2d');
+function draw(){
+  const dpr=window.devicePixelRatio||1;
+  const w=cv.clientWidth, h=cv.clientHeight;
+  cv.width=w*dpr; cv.height=h*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,w,h);
+
+  const padL=52,padR=14,padT=14,padB=26;
+  const plotW=w-padL-padR, plotH=h-padT-padB;
+  const curOz=currentOz();
+  const xmin=1999, xmax=2026;
+
+  const nominal=YEARS.map(y=>({x:y,v:GOLD[y]})).concat([{x:2026,v:curOz}]);
+  const real=YEARS.map(y=>({x:y,v:GOLD[y]*realFactor(y)})).concat([{x:2026,v:curOz}]);
+  const trendPts=[]; for(let y=1999;y<=2026;y++) trendPts.push({x:y,v:trend(y)});
+
+  // Puntos reales registrados por el usuario (valor de mercado -> USD/oz)
+  const minePts=(loadLots()||[]).filter(l=>l.market>0).map(l=>{
+    const [yy,mm]=l.date.split('-');
+    return { x:parseInt(yy,10)+(parseInt(mm,10)-1)/12, v:l.market*G_PER_OZ };
+  }).filter(p=>p.x>=xmin && p.x<=xmax);
+
+  let vmax=0; nominal.concat(real,trendPts,minePts).forEach(p=>vmax=Math.max(vmax,p.v));
+  vmax=Math.ceil(vmax/500)*500;
+  const X=x=>padL+(x-xmin)/(xmax-xmin)*plotW;
+  const Y=v=>padT+(1-v/vmax)*plotH;
+
+  // grid + etiquetas Y
+  ctx.font='11px '+getComputedStyle(document.body).fontFamily;
+  ctx.textBaseline='middle';
+  for(let g=0;g<=vmax;g+=1000){
+    const yy=Y(g);
+    ctx.strokeStyle='#eef0f5'; ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(padL,yy);ctx.lineTo(w-padR,yy);ctx.stroke();
+    ctx.fillStyle='#98a0b3'; ctx.textAlign='right';
+    ctx.fillText('$'+(g/1000)+'k', padL-8, yy);
+  }
+  // etiquetas X
+  ctx.textAlign='center'; ctx.textBaseline='top';
+  [2000,2005,2010,2015,2020,2025].forEach(y=>{
+    ctx.fillStyle='#98a0b3'; ctx.fillText(y, X(y), h-padB+8);
+  });
+
+  // franja de distorsión (entre nominal y real)
+  if($('showDistort').checked){
+    ctx.beginPath();
+    nominal.forEach((p,i)=> i? ctx.lineTo(X(p.x),Y(p.v)) : ctx.moveTo(X(p.x),Y(p.v)));
+    for(let i=real.length-1;i>=0;i--) ctx.lineTo(X(real[i].x),Y(real[i].v));
+    ctx.closePath();
+    ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--distort');
+    ctx.fill();
+  }
+
+  const plot=(pts,color,width,dash)=>{
+    ctx.beginPath(); ctx.setLineDash(dash||[]);
+    pts.forEach((p,i)=> i? ctx.lineTo(X(p.x),Y(p.v)) : ctx.moveTo(X(p.x),Y(p.v)));
+    ctx.strokeStyle=color; ctx.lineWidth=width; ctx.lineJoin='round';
+    ctx.stroke(); ctx.setLineDash([]);
+  };
+  plot(trendPts, getComputedStyle(document.documentElement).getPropertyValue('--trend'),1.5,[4,4]);
+  plot(real, getComputedStyle(document.documentElement).getPropertyValue('--real'),2.4);
+  plot(nominal, getComputedStyle(document.documentElement).getPropertyValue('--gold'),2.4);
+
+  // punto "hoy"
+  const hx=X(2026), hy=Y(curOz);
+  ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue('--gold');
+  ctx.beginPath();ctx.arc(hx,hy,4,0,7);ctx.fill();
+  ctx.fillStyle='#161922'; ctx.font='700 11px '+getComputedStyle(document.body).fontFamily;
+  ctx.textAlign='right'; ctx.textBaseline='bottom';
+  ctx.fillText('hoy', hx-6, hy-2);
+
+  // tus registros de mercado (puntos reales)
+  const mineColor=getComputedStyle(document.documentElement).getPropertyValue('--mine');
+  minePts.forEach(p=>{
+    ctx.beginPath(); ctx.arc(X(p.x),Y(p.v),4,0,7);
+    ctx.fillStyle=mineColor; ctx.fill();
+    ctx.lineWidth=1.5; ctx.strokeStyle='#fff'; ctx.stroke();
+  });
+  const ml=$('mineLeg'); if(ml) ml.style.display=minePts.length?'inline-flex':'none';
+}
+
+// ---------- Valuación ----------
+function updateValuation(){
+  const curOz=currentOz();
+  const t=trend(2026);
+  const dev=(curOz/t-1)*100;
+  $('devVal').innerHTML = (dev>=0?'+':'')+fmt(dev,0)+'% '+
+    (dev>15?'<span class="tag hi">por encima</span>':dev<-15?'<span class="tag lo">por debajo</span>':'<span class="tag mid">en línea</span>');
+  $('devNote').textContent = dev>15
+    ? 'Históricamente caro frente a su tendencia. En el pasado, niveles así solían preceder pausas o correcciones — pero no es garantía.'
+    : dev<-15 ? 'Históricamente barato frente a su tendencia. Puede ser oportunidad… o el inicio de una caída mayor.'
+    : 'Cerca de su tendencia de largo plazo. Ni caro ni barato en términos históricos.';
+
+  // vs máximo real
+  let peak=0; YEARS.forEach(y=>peak=Math.max(peak,GOLD[y]*realFactor(y)));
+  const vsPeak=(curOz/peak-1)*100;
+  $('peakVal').innerHTML=(vsPeak>=0?'+':'')+fmt(vsPeak,0)+'%';
+  $('peakNote').textContent = vsPeak>=0
+    ? 'Estás en o por encima del punto más alto que el oro ha alcanzado en términos reales desde 1999.'
+    : 'Aún por debajo del máximo real registrado desde 1999.';
+}
+
+// ---------- DCA ----------
+function updateDCA(){
+  const amt=Math.max(0,parseFloat($('dcaAmt').value)||0);
+  const start=parseInt($('dcaYear').value,10);
+  const rate=Math.max(0,parseFloat($('dcaRate').value)||0);
+  const curOz=currentOz(), curG=curOz/G_PER_OZ;
+  const r=rate/100/12;
+  let grams=0, invested=0, fvAlt=0, months=0;
+  for(let y=start;y<=2025;y++){
+    const pg=GOLD[y]/G_PER_OZ;
+    for(let m=0;m<12;m++){ grams+=amt/pg; invested+=amt; fvAlt=fvAlt*(1+r)+amt; months++; }
+  }
+  // mes actual
+  grams+=amt/curG; invested+=amt; fvAlt=fvAlt*(1+r)+amt;
+  const val=grams*curG;
+  $('oInv').textContent=usd(invested);
+  $('oGr').textContent=fmt(grams,0)+' g';
+  $('oVal').textContent=usd(val);
+  $('rShow').textContent=fmt(rate,0);
+  $('oAlt').textContent=usd(fvAlt);
+  const diff=val-fvAlt;
+  $('dcaVerdict').innerHTML = Math.abs(diff)<invested*0.03
+    ? 'En este período, el oro y la alternativa segura habrían quedado casi iguales.'
+    : diff>0
+      ? '<b>En este período el oro ganó</b> por ~'+usd(diff)+'. Pero ojo: empezar temprano capturó los años en que el oro estaba barato; comenzar cerca de un pico habría dado el resultado opuesto.'
+      : 'En este período <b>la alternativa segura al '+fmt(rate,0)+'% ganó</b> por ~'+usd(-diff)+', con mucha menos volatilidad y sin depender de acertar el momento.';
+}
+
+// ---------- Wiring ----------
+// ---------- Registro de compras (guardado local, por usuario) ----------
+let currentUser=null;               // se define al iniciar sesión
+const memLots={};                   // respaldo si no hay localStorage
+function lotsKey(){ return 'oroLots__'+(currentUser||'_none_'); }
+function loadLots(){
+  if(!currentUser) return [];
+  try{ const s=localStorage.getItem(lotsKey()); return s?JSON.parse(s):[]; }
+  catch(e){ return memLots[currentUser]||[]; }
+}
+function saveLots(lots){
+  if(!currentUser) return;
+  try{ localStorage.setItem(lotsKey(), JSON.stringify(lots)); }
+  catch(e){ memLots[currentUser]=lots; }
+}
+function addLot(){
+  const date=$('lotDate').value;
+  const grams=parseFloat($('lotGr').value);
+  const price=parseFloat($('lotPr').value);
+  let market=parseFloat($('lotMk').value);
+  if(!date||!(grams>0)||!(price>0)){ alert('Completa fecha, gramos y precio pagado (mayores a cero).'); return; }
+  if(!(market>0)) market=price; // si no lo llenas, se asume igual al precio pagado
+  const lots=loadLots();
+  lots.push({date,grams,price,market});
+  lots.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
+  saveLots(lots);
+  $('lotGr').value=''; // deja fecha, precio y mercado para agilizar cargas seguidas
+  renderPortfolio();
+}
+function delLot(i){
+  const lots=loadLots(); lots.splice(i,1); saveLots(lots); renderPortfolio();
+}
+function renderPortfolio(){
+  const curG=currentOz()/G_PER_OZ;
+  $('lotHint').textContent=usd(curG,2);
+  const lots=loadLots();
+  const has=lots.length>0;
+  $('lotEmpty').style.display=has?'none':'block';
+  $('lotWrap').style.display=has?'block':'none';
+  $('portChart').style.display=has?'block':'none';
+  $('portNote').style.display=has?'block':'none';
+  const body=$('lotBody'); body.innerHTML='';
+  let tGr=0,tCost=0,tVal=0;
+  const cum=[]; let cc=0,cv=0;
+  lots.forEach((l,i)=>{
+    const cost=l.grams*l.price, val=l.grams*curG, gain=val-cost;
+    const pct=cost>0?gain/cost*100:0;
+    tGr+=l.grams; tCost+=cost; tVal+=val; cc+=cost; cv+=val;
+    cum.push({cost:cc,val:cv});
+    const tr=document.createElement('tr');
+    tr.className=gain>=0?'gain':'loss';
+    const [yy,mm]=l.date.split('-');
+    const mk=(l.market>0)?usd(l.market,2):'—';
+    tr.innerHTML=`<td>${mm}/${yy}</td><td>${fmt(l.grams,1)}</td><td>${usd(l.price,2)}</td><td>${mk}</td>`+
+      `<td>${usd(cost)}</td><td>${usd(val)}</td>`+
+      `<td class="g">${gain>=0?'+':''}${usd(gain)}</td>`+
+      `<td class="g">${gain>=0?'+':''}${fmt(pct,0)}%</td>`+
+      `<td><button class="del" data-i="${i}" aria-label="Eliminar">✕</button></td>`;
+    body.appendChild(tr);
+  });
+  const tGain=tVal-tCost, tPct=tCost>0?tGain/tCost*100:0;
+  $('tGr').textContent=fmt(tGr,1);
+  $('tCost').textContent=usd(tCost);
+  $('tVal').textContent=usd(tVal);
+  $('tGain').textContent=(tGain>=0?'+':'')+usd(tGain);
+  $('tGain').style.color=tGain>=0?'var(--good)':'var(--bad)';
+  $('tPct').textContent=(tGain>=0?'+':'')+fmt(tPct,0)+'%';
+  $('tPct').style.color=tGain>=0?'var(--good)':'var(--bad)';
+  body.querySelectorAll('.del').forEach(b=>b.addEventListener('click',()=>delLot(+b.dataset.i)));
+  drawPort(cum);
+  draw(); // redibuja el gráfico de referencia con tus puntos de mercado
+}
+function drawPort(cum){
+  const cv=$('portChart'); if(cv.style.display==='none')return;
+  const ctx=cv.getContext('2d'), dpr=window.devicePixelRatio||1;
+  const w=cv.clientWidth,h=cv.clientHeight; cv.width=w*dpr;cv.height=h*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
+  if(cum.length===0)return;
+  const padL=48,padR=12,padT=10,padB=18, pw=w-padL-padR, ph=h-padT-padB;
+  let vmax=0; cum.forEach(p=>vmax=Math.max(vmax,p.cost,p.val)); vmax=vmax*1.1||1;
+  const n=cum.length;
+  const X=i=> n>1? padL+i/(n-1)*pw : padL+pw/2;
+  const Y=v=> padT+(1-v/vmax)*ph;
+  ctx.strokeStyle='#eef0f5';ctx.lineWidth=1;
+  [0,0.5,1].forEach(f=>{const yy=padT+f*ph;ctx.beginPath();ctx.moveTo(padL,yy);ctx.lineTo(w-padR,yy);ctx.stroke();
+    ctx.fillStyle='#98a0b3';ctx.font='10px sans-serif';ctx.textAlign='right';ctx.textBaseline='middle';
+    ctx.fillText('$'+fmt(vmax*(1-f),0),padL-6,yy);});
+  const line=(key,color)=>{ctx.beginPath();cum.forEach((p,i)=>i?ctx.lineTo(X(i),Y(p[key])):ctx.moveTo(X(i),Y(p[key])));
+    ctx.strokeStyle=color;ctx.lineWidth=2.4;ctx.lineJoin='round';ctx.stroke();};
+  // relleno de ganancia entre val y cost
+  ctx.beginPath();
+  cum.forEach((p,i)=>i?ctx.lineTo(X(i),Y(p.val)):ctx.moveTo(X(i),Y(p.val)));
+  for(let i=cum.length-1;i>=0;i--)ctx.lineTo(X(i),Y(cum[i].cost));
+  ctx.closePath(); ctx.fillStyle='rgba(47,125,87,.10)'; ctx.fill();
+  line('cost',getComputedStyle(document.documentElement).getPropertyValue('--gold'));
+  line('val',getComputedStyle(document.documentElement).getPropertyValue('--real'));
+}
+
+function refreshAll(){
+  const curOz=currentOz();
+  $('pergram').textContent = priceUnit==='g'
+    ? 'Equivale a '+usd(curOz)+' por onza troy.'
+    : 'Equivale a '+usd(curOz/G_PER_OZ,2)+' por gramo.';
+  draw(); updateValuation(); updateDCA(); renderPortfolio();
+}
+// llenar años
+(function(){
+  const sel=$('dcaYear');
+  YEARS.forEach(y=>{const o=document.createElement('option');o.value=y;o.textContent=y;sel.appendChild(o);});
+  sel.value=2000;
+})();
+['price'].forEach(id=>$(id).addEventListener('input',refreshAll));
+['dcaAmt','dcaYear','dcaRate'].forEach(id=>$(id).addEventListener('input',updateDCA));
+$('showDistort').addEventListener('change',()=>{ $('distLeg').style.opacity=$('showDistort').checked?1:.35; draw(); });
+$('lotAdd').addEventListener('click',addLot);
+
+// ---------- Actualización automática del precio ----------
+function setStatus(msg,cls){ const el=$('fetchStatus'); el.textContent=msg; el.className='fetch-status'+(cls?' '+cls:''); }
+function applyLivePrice(perOz,fromCache){
+  $('price').value = priceUnit==='g' ? (perOz/G_PER_OZ).toFixed(2) : perOz.toFixed(2);
+  refreshAll();
+  const now=Date.now();
+  if(!fromCache){ try{ localStorage.setItem('goldLive',JSON.stringify({p:perOz,t:now})); }catch(e){} }
+  const d=new Date(fromCache?fromCache:now);
+  const t=d.toLocaleString('es-EC',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+  setStatus((fromCache?'Último precio guardado ':'✓ Actualizado ')+'('+t+'): '+usd(perOz,2)+'/oz'+(fromCache?'. Toca "Actualizar" para el de hoy.':'.'), fromCache?'':'ok');
+}
+function withTimeout(fn,ms){
+  const c=new AbortController(); const id=setTimeout(()=>c.abort(),ms);
+  return Promise.resolve(fn(c.signal)).finally(()=>clearTimeout(id));
+}
+const getJSON=(url,opts)=>withTimeout(sig=>fetch(url,Object.assign({signal:sig},opts)).then(r=>{if(!r.ok)throw new Error(r.status);return r.json();}),9000);
+
+// Fuente 1: metals.dev con key (key en la URL -> compatible con navegador)
+async function tryMetalsDev(key){
+  const d=await getJSON('https://api.metals.dev/v1/latest?api_key='+encodeURIComponent(key)+'&currency=USD&unit=toz');
+  const p=parseFloat(d && d.metals && d.metals.gold);
+  if(p>0) return p; throw new Error('sin dato');
+}
+// Fuente 2: gold-api.com sin key (directo)
+async function tryGoldApi(){
+  const d=await getJSON('https://api.gold-api.com/price/XAU');
+  const p=parseFloat(d && d.price); if(p>0) return p; throw new Error('sin dato');
+}
+// Fuente 3: gold-api.com vía proxy CORS (salva el bloqueo de archivos locales)
+async function tryGoldApiProxy(){
+  const target=encodeURIComponent('https://api.gold-api.com/price/XAU');
+  const d=await getJSON('https://api.allorigins.win/raw?url='+target);
+  const p=parseFloat(d && d.price); if(p>0) return p; throw new Error('sin dato');
+}
+
+async function updatePrice(manual){
+  $('fetchBtn').disabled=true; setStatus('Conectando…');
+  const key=(($('apiKey').value)||'').trim();
+  const sources=[];
+  if(key) sources.push(['tu key (metals.dev)',()=>tryMetalsDev(key)]);
+  sources.push(['API gratuita',tryGoldApi]);
+  sources.push(['API gratuita (proxy)',tryGoldApiProxy]);
+  for(const [name,fn] of sources){
+    try{ const p=await fn(); applyLivePrice(p); $('fetchBtn').disabled=false; return true; }
+    catch(e){ /* siguiente fuente */ }
+  }
+  $('fetchBtn').disabled=false;
+  // si falla todo: deja el último guardado si existe
+  let cached=null; try{ cached=JSON.parse(localStorage.getItem('goldLive')||'null'); }catch(e){}
+  if(cached && cached.p>0){ applyLivePrice(cached.p, cached.t); if(manual) setStatus('No hubo conexión hoy. Muestro el último precio guardado — o escribe el de hoy a mano.','err'); }
+  else setStatus('No se pudo conectar. Pega tu key de metals.dev (más confiable) o escribe el precio a mano.','err');
+  return false;
+}
+
+function saveKeyAndUpdate(){
+  const key=(($('apiKey').value)||'').trim();
+  if(!key){ setStatus('Pega primero tu key de metals.dev.','err'); return; }
+  try{ localStorage.setItem('goldKey',key); }catch(e){}
+  updatePrice(true);
+}
+
+$('fetchBtn').addEventListener('click',()=>updatePrice(true));
+$('fetchKeyBtn').addEventListener('click',saveKeyAndUpdate);
+try{ const k=localStorage.getItem('goldKey'); if(k)$('apiKey').value=k; }catch(e){}
+
+// Al abrir la app: muestra lo último guardado y luego intenta refrescar solo
+function initLive(){
+  let cached=null; try{ cached=JSON.parse(localStorage.getItem('goldLive')||'null'); }catch(e){}
+  if(cached && cached.p>0) applyLivePrice(cached.p, cached.t);
+  updatePrice(false); // intento automático al abrir
+}
+$('unitSeg').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b)return;
+  const u=b.dataset.u; if(u===priceUnit)return;
+  // convierte el número visible para conservar el mismo precio real
+  const v=parseFloat($('price').value)||0;
+  $('price').value = u==='g' ? (v/G_PER_OZ).toFixed(2) : (v*G_PER_OZ).toFixed(0);
+  priceUnit=u;
+  $('unitSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.u===u));
+  $('price').step = u==='g' ? '0.5' : '5';
+  refreshAll();
+});
+window.addEventListener('resize',()=>{ draw(); renderPortfolio(); });
+// valores por defecto cómodos para el registro
+(function(){
+  const d=new Date();
+  $('lotDate').value=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+  $('lotPr').value=(currentOz()/G_PER_OZ).toFixed(2);
+  $('lotMk').value=(currentOz()/G_PER_OZ).toFixed(2);
+})();
+refreshAll();
+initLive();
+
+// ---------- Autenticación (candado de conveniencia, datos por usuario) ----------
+function getUsers(){ try{return JSON.parse(localStorage.getItem('oroUsers')||'{}');}catch(e){return {};} }
+function setUsers(u){ try{localStorage.setItem('oroUsers',JSON.stringify(u));}catch(e){} }
+function authMsg(m){ $('authMsg').textContent=m||''; }
+let authMode='login';
+function showAuth(mode){
+  authMode=mode;
+  const reg=mode==='register';
+  $('authTitle').textContent=reg?'Crear usuario':'Iniciar sesión';
+  $('authBtn').textContent=reg?'Crear y entrar':'Entrar';
+  $('auConfirmWrap').style.display=reg?'block':'none';
+  $('authSwitchTxt').textContent=reg?'¿Ya tienes usuario?':'¿Nuevo aquí?';
+  $('authSwitch').textContent=reg?'Iniciar sesión':'Crear usuario';
+  authMsg(''); $('auPass').value=''; $('auPass2').value='';
+  $('authModal').style.display='flex'; $('userbar').style.display='none';
+  document.body.style.overflow='hidden';
+}
+function hideAuth(){ $('authModal').style.display='none'; document.body.style.overflow=''; }
+async function hashPw(pw,salt){
+  const data=salt+'|'+pw;
+  if(window.crypto && crypto.subtle){
+    try{
+      const buf=await crypto.subtle.digest('SHA-256', new TextEncoder().encode(data));
+      return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+    }catch(e){}
+  }
+  let h=5381; for(let i=0;i<data.length;i++){ h=((h<<5)+h+data.charCodeAt(i))>>>0; } // respaldo (no criptográfico)
+  return 'x'+h.toString(16);
+}
+async function doRegister(){
+  const name=$('auName').value.trim();
+  const key=name.toLowerCase();
+  const pw=$('auPass').value, pw2=$('auPass2').value;
+  if(!name){ authMsg('Escribe un nombre de usuario.'); return; }
+  if(pw.length<4){ authMsg('La contraseña debe tener al menos 4 caracteres.'); return; }
+  if(pw!==pw2){ authMsg('Las contraseñas no coinciden.'); return; }
+  const users=getUsers();
+  if(users[key]){ authMsg('Ese usuario ya existe. Inicia sesión.'); return; }
+  const salt=Math.random().toString(36).slice(2)+Date.now().toString(36);
+  users[key]={salt,hash:await hashPw(pw,salt),display:name};
+  setUsers(users);
+  // migración: primer usuario hereda lotes antiguos globales si los hubiera
+  if(Object.keys(users).length===1){ const old=localStorage.getItem('oroLots'); if(old){ try{localStorage.setItem('oroLots__'+key,old);}catch(e){} } }
+  finishLogin(key);
+}
+async function doLoginSubmit(){
+  const key=$('auName').value.trim().toLowerCase();
+  const pw=$('auPass').value;
+  const users=getUsers(), u=users[key];
+  if(!u){ authMsg('Usuario no encontrado.'); return; }
+  if(await hashPw(pw,u.salt)!==u.hash){ authMsg('Contraseña incorrecta.'); return; }
+  finishLogin(key);
+}
+function finishLogin(key){
+  currentUser=key;
+  try{ localStorage.setItem('oroCurrentUser',key); }catch(e){}
+  const users=getUsers();
+  $('userName').textContent=(users[key]&&users[key].display)||key;
+  $('userbar').style.display='flex';
+  hideAuth();
+  $('lotPr').value=(currentOz()/G_PER_OZ).toFixed(2);
+  $('lotMk').value=(currentOz()/G_PER_OZ).toFixed(2);
+  renderPortfolio();
+}
+function doLogout(){
+  currentUser=null;
+  try{ localStorage.removeItem('oroCurrentUser'); }catch(e){}
+  renderPortfolio();
+  $('auName').value='';
+  showAuth(Object.keys(getUsers()).length?'login':'register');
+}
+$('authBtn').addEventListener('click',()=> authMode==='register'?doRegister():doLoginSubmit());
+$('authSwitch').addEventListener('click',()=> showAuth(authMode==='register'?'login':'register'));
+$('logoutBtn').addEventListener('click',doLogout);
+['auName','auPass','auPass2'].forEach(id=>$(id).addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('authBtn').click(); } }));
+// arranque: sesión guardada -> entra directo; si no, login o registro segun haya usuarios
+(function(){
+  const users=getUsers(), saved=localStorage.getItem('oroCurrentUser');
+  if(saved && users[saved]) finishLogin(saved);
+  else showAuth(Object.keys(users).length?'login':'register');
+})();
+</script>
+</body>
+</html>
